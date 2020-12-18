@@ -42,7 +42,7 @@ def client_sender(buffer):
         client.connect((target, port))
 
         if len(buffer):
-            client.send(buffer)
+            client.send(buffer.encode('utf-8'))
         while True:
 
             # now wait for data back
@@ -63,12 +63,112 @@ def client_sender(buffer):
             buffer += "\n"
 
             # send it off
-            client.send(buffer)
-    except:
-        print("[*] Exception! Exiting.")
+            client.send(buffer.encode('utf-8'))
 
-        # tear down the connection
+    except socket.error as exc:
+        # just catch generic errors - you can do your homework to beef this up
+        print("[*] Exception! Exiting.")
+        print(f"[*] Caught exception socket.error: {exc}")
+
+        # teardown the connection
         client.close()
+
+
+def server_loop():
+    global target
+
+    # if no target is defined, we listen on all interfaces
+    if not len(target):
+        target = "0.0.0.0"
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind((target, port))
+    server.listen(5)
+
+    while True:
+        client_socket, addr = server.accept()
+
+        # spin off a thread to handle our new client
+        client_thread = threading.Thread(
+            target=client_handler, args=(client_socket,))
+        client_thread.start()
+
+
+def run_command(cmd):
+
+    # trim the newline
+    cmd = cmd.rstrip()
+
+    # run the command and get the output back
+    try:
+        output = subprocess.check_output(
+            command, stderr=subprocess.STDOUT, shell=true)
+    except:
+        output = "Failed to execute command.\r\n"
+
+    # send the output back to the client
+    return output
+
+
+def client_handler(client_socket):
+    global upload
+    global execute
+    global command
+
+    # check for upload
+    if len(upload_destination):
+
+        # read in all of the bytes and write to our destination
+        file_buffer = ""
+
+        # keep reading data until none is available
+        while True:
+            data = client_socket.recv(1024)
+
+            if not data:
+                break
+            else:
+                file_buffer += data
+
+            # now we take these bytes and try to write them out
+            try:
+                file_descripter = open(upload_destination, "wb")
+                file_descripter.write(file_buffer.encode('utf-8'))
+                file_descripter.close()
+
+                # acknowledge that we wrote the file out
+                client_socket.send(
+                    "Successfully saved file to %s\r\n" % upload_destination)
+            except:
+                client_socket.send(
+                    "Failed to save file to %s\r\n" % upload_destination)
+
+    if len(execute):
+
+        # run the command
+        output = run_command(execute)
+
+        client_socket.send(output)
+
+    # now we go into another loop if a command shell was requested
+    if command:
+
+        while True:
+
+            # show a simple prompt
+            client_socket.send("<BHP:#> ".encode('utf-8'))
+
+            # now we receive until we see a linefeed (enter key)
+            cmd_buffer = b''
+
+            while "\n" not in cmd_buffer:
+                cmd_buffer = client_socket.recv(1024)
+
+            # send back the command output
+            response = run_command(cmd_buffer)
+
+            # send back the response
+            client_socket.send(response)
 
 
 def main():
